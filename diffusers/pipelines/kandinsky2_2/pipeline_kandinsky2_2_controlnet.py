@@ -259,7 +259,7 @@ class KandinskyV22ControlnetPipeline(DiffusionPipeline):
             latents,
             self.scheduler,
         )
-
+        
         for i, t in enumerate(self.progress_bar(timesteps_tensor)):
             # expand the latents if we are doing classifier free guidance
             latent_model_input = torch.cat([latents] * 2) if do_classifier_free_guidance else latents
