@@ -18,15 +18,16 @@ from diffusers.pipelines.kandinsky2_2.pipline_kandinsky2_2_controlnet_inpainting
 
 import wandb
 
-def log_validation(movq, unet, args, accelerator, weight_dtype,):
+def log_validation(image_encoder, movq, unet, accelerator, weight_dtype, args):
     prior_pipeline = KandinskyV22PriorPipeline.from_pretrained(
         args.prior_model_path, 
-        torch_dtype=torch.float16, 
+        torch_dtype=torch.float16,
+        image_encoder=image_encoder,
         use_safetensors=True)
     pipeline = KandinskyV22ControlnetInpaintPipeline.from_pretrained(
         args.decoder_model_path,
         unet=accelerator.unwrap_model(unet),
-        movq=accelerator.unwrap_model(movq),
+        movq=movq,
         torch_dtype=weight_dtype,
     )
 
@@ -81,6 +82,7 @@ def log_validation(movq, unet, args, accelerator, weight_dtype,):
             )
 
 
+    del prior_pipeline
     del pipeline
     torch.cuda.empty_cache()
 
@@ -304,7 +306,7 @@ def main():
             args.prior_model_path, subfolder="image_encoder", torch_dtype=weight_dtype
         ).eval()
     unet = UNet2DConditionModel.from_pretrained(args.decoder_model_path, subfolder="unet")
-
+    
     movq.requires_grad_(False)
     image_encoder.requires_grad_(False)
     unet.train()
@@ -320,7 +322,7 @@ def main():
         batch_size=args.batch_size,
         num_workers=0,
     )
-
+    
     if args.use_lr_scheduler:
         optimizer = torch.optim.AdamW(
             unet.parameters(),
@@ -414,14 +416,12 @@ def main():
                 
                 if args.val_prompts is not None and global_step % args.validation_step == 0:
                     log_validation(
-                        movq,
                         image_encoder,
-                        image_processor,
+                        movq,
                         unet,
-                        args,
                         accelerator,
                         weight_dtype,
-                        global_step,
+                        args,
                     )
 
             logs = {"step_loss": loss.detach().item(), "lr": lr_scheduler.get_last_lr()[0]}

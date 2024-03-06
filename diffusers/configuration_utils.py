@@ -264,6 +264,10 @@ class ConfigMixin:
         # add hidden kwargs of compatible classes to unused_kwargs
         unused_kwargs = {**unused_kwargs, **hidden_dict}
 
+        # middlek added
+        if kwargs.get("torch_dtype", None) is not None:
+            model.to(dtype=kwargs.get("torch_dtype"))
+        
         if return_unused_kwargs:
             return (model, unused_kwargs)
         else:

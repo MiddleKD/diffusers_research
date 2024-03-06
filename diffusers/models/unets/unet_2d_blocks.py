@@ -1992,7 +1992,6 @@ class SimpleCrossAttnDownBlock2D(nn.Module):
                 )
             else:
                 hidden_states = resnet(hidden_states, temb, scale=lora_scale)
-
                 hidden_states = attn(
                     hidden_states,
                     encoder_hidden_states=encoder_hidden_states,
