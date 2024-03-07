@@ -3,7 +3,7 @@ diffusers_parents/
 pychache/
 Favorfit_*/
 wandb/
-
+training/
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
