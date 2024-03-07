@@ -512,8 +512,8 @@ class KandinskyV22ControlnetInpaintPipeline(DiffusionPipeline):
         self._num_timesteps = len(timesteps)
         for i, t in enumerate(self.progress_bar(timesteps)):
             # expand the latents if we are doing classifier free guidance
-            latent_model_input = torch.cat([latents] * 2) if self.do_classifier_free_guidance else latents
-            latent_model_input = torch.cat([latent_model_input, masked_image, mask_image], dim=1)
+            latent_control_input = torch.cat([latents] * 2) if self.do_classifier_free_guidance else latents
+            latent_model_input = torch.cat([latent_control_input, masked_image, mask_image], dim=1)
 
             cond_added_cond_kwargs = {"image_embeds": image_embeds}
             down_block_res_samples, mid_block_res_sample = self.controlnet(
