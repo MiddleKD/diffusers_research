@@ -355,7 +355,6 @@ class KandinskyV22ControlnetPipeline(DiffusionPipeline):
             self.scheduler,
             latent_timestep,
         )
-        noise = torch.clone(latents)
 
         self._num_timesteps = len(timesteps)
         for i, t in enumerate(self.progress_bar(timesteps)):
@@ -404,56 +403,27 @@ class KandinskyV22ControlnetPipeline(DiffusionPipeline):
                 latents,
                 generator=generator,
             )[0]
-            init_latents_proper = image[:1]
-            init_mask = mask_image[:1]
-
-            if i < len(timesteps) - 1:
-                noise_timestep = timesteps[i + 1]
-                init_latents_proper = self.scheduler.add_noise(
-                    init_latents_proper, noise, torch.tensor([noise_timestep])
-                )
-
-            latents = init_mask * init_latents_proper + (1 - init_mask) * latents
-
-            if callback_on_step_end is not None:
-                callback_kwargs = {}
-                for k in callback_on_step_end_tensor_inputs:
-                    callback_kwargs[k] = locals()[k]
-                callback_outputs = callback_on_step_end(self, i, t, callback_kwargs)
-
-                latents = callback_outputs.pop("latents", latents)
-                image_embeds = callback_outputs.pop("image_embeds", image_embeds)
-                negative_image_embeds = callback_outputs.pop("negative_image_embeds", negative_image_embeds)
-                masked_image = callback_outputs.pop("masked_image", masked_image)
-                mask_image = callback_outputs.pop("mask_image", mask_image)
 
             if callback is not None and i % callback_steps == 0:
                 step_idx = i // getattr(self.scheduler, "order", 1)
                 callback(step_idx, t, latents)
 
         # post-processing
-        latents = mask_image[:1] * image[:1] + (1 - mask_image[:1]) * latents
-
-        if output_type not in ["pt", "np", "pil", "latent"]:
-            raise ValueError(
-                f"Only the output types `pt`, `pil`, `np` and `latent` are supported not output_type={output_type}"
-            )
-
-        if not output_type == "latent":
-            image = self.movq.decode(latents, force_not_quantize=True)["sample"]
-
-            if output_type in ["np", "pil"]:
-                image = image * 0.5 + 0.5
-                image = image.clamp(0, 1)
-                image = image.cpu().permute(0, 2, 3, 1).float().numpy()
-
-            if output_type == "pil":
-                image = self.numpy_to_pil(image)
-        else:
-            image = latents
+        image = self.movq.decode(latents, force_not_quantize=True)["sample"]
 
         # Offload all models
         self.maybe_free_model_hooks()
+
+        if output_type not in ["pt", "np", "pil"]:
+            raise ValueError(f"Only the output types `pt`, `pil` and `np` are supported not output_type={output_type}")
+
+        if output_type in ["np", "pil"]:
+            image = image * 0.5 + 0.5
+            image = image.clamp(0, 1)
+            image = image.cpu().permute(0, 2, 3, 1).float().numpy()
+
+        if output_type == "pil":
+            image = self.numpy_to_pil(image)
 
         if not return_dict:
             return (image,)
