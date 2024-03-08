@@ -125,6 +125,12 @@ def parse_args():
         default=None,
     )
     parser.add_argument(
+        "--save_dir",
+        type=str,
+        default="./training",
+        required=False,
+    )
+    parser.add_argument(
         "--val_prompts",
         type=str,
         default=None,
@@ -500,7 +506,7 @@ def main():
             if accelerator.is_main_process:
                 if global_step % args.save_ckpt_step == 0:
                     if global_step % args.save_ckpt_step == 0:
-                        save_path = os.path.join("./training", f"checkpoint-{global_step}")
+                        save_path = os.path.join(args.save_dir, f"checkpoint-{global_step}")
                         os.makedirs(save_path,exist_ok=True)
 
                         controlnet = accelerator.unwrap_model(controlnet)
