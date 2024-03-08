@@ -328,10 +328,11 @@ class KandinskyV22ControlnetPipeline(DiffusionPipeline):
         latent_timestep = timesteps[:1].repeat(batch_size)
 
         # preprocess image and mask
-        image = prepare_image(image, width, height)
+        if image is not None:
+            image = prepare_image(image, width, height)
 
-        image = image.to(dtype=image_embeds.dtype, device=device)
-        image = self.movq.encode(image)["latents"]
+            image = image.to(dtype=image_embeds.dtype, device=device)
+            image = self.movq.encode(image)["latents"]
 
         control_image = prepare_control_image(control_image, height, width)
         control_image = control_image.to(dtype=image_embeds.dtype, device=device)
