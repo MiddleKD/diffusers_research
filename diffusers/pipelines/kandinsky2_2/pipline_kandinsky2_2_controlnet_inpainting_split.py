@@ -91,25 +91,28 @@ def downscale_height_and_width(height, width, scale_factor=8):
 # Copied from diffusers.pipelines.kandinsky.pipeline_kandinsky_inpaint.prepare_mask
 def prepare_mask(masks):
     prepared_masks = []
+
+    replace_value = 1
     for mask in masks:
-        old_mask = deepcopy(mask)
-        for i in range(mask.shape[1]):
-            for j in range(mask.shape[2]):
-                if old_mask[0][i][j] == 1:
-                    continue
-                if i != 0:
-                    mask[:, i - 1, j] = 0
-                if j != 0:
-                    mask[:, i, j - 1] = 0
-                if i != 0 and j != 0:
-                    mask[:, i - 1, j - 1] = 0
-                if i != mask.shape[1] - 1:
-                    mask[:, i + 1, j] = 0
-                if j != mask.shape[2] - 1:
-                    mask[:, i, j + 1] = 0
-                if i != mask.shape[1] - 1 and j != mask.shape[2] - 1:
-                    mask[:, i + 1, j + 1] = 0
+        # old_mask = deepcopy(mask)
+        # for i in range(mask.shape[1]):
+        #     for j in range(mask.shape[2]):
+        #         if old_mask[0][i][j] != replace_value:
+        #             continue
+        #         if i != 0:
+        #             mask[:, i - 1, j] = replace_value
+        #         if j != 0:
+        #             mask[:, i, j - 1] = replace_value
+        #         if i != 0 and j != 0:
+        #             mask[:, i - 1, j - 1] = replace_value
+        #         if i != mask.shape[1] - 1:
+        #             mask[:, i + 1, j] = replace_value
+        #         if j != mask.shape[2] - 1:
+        #             mask[:, i, j + 1] = replace_value
+        #         if i != mask.shape[1] - 1 and j != mask.shape[2] - 1:
+        #             mask[:, i + 1, j + 1] = replace_value
         prepared_masks.append(mask)
+    
     return torch.stack(prepared_masks, dim=0)
 
 

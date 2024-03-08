@@ -64,7 +64,7 @@ def log_validation(image_encoder, movq, unet, controlnet, accelerator, weight_dt
             )
             image = pipeline(image=val_image,
                             mask_image=val_mask,
-                            control_image=val_mask,
+                            control_image=val_cond,
                             **prior_output, 
                             height=512,
                             width=512, 
@@ -249,15 +249,8 @@ def make_train_dataset(path, image_processor, accelerator, args):
         clip_images = [image.convert("RGB") for image in examples[image_column]]
         clip_images = [image_processor(image, return_tensors="pt").pixel_values[0] for image in clip_images]
 
-        # conditioning_images = [image.convert("RGB") for image in examples[conditioning_image_column]]
-        # conditioning_images = [image_transforms(image) for image in conditioning_images]
-
-        conditioning_images = [
-            invert(mask.convert("L")) 
-            if args.invert_mask==True else mask.convert("L") 
-            for mask in examples[mask_column]
-        ]
-        conditioning_images = [image_transforms(mask) for mask in conditioning_images]
+        conditioning_images = [image.convert("RGB") for image in examples[conditioning_image_column]]
+        conditioning_images = [image_transforms(image) for image in conditioning_images]
 
         masks = [
             invert(mask.convert("L")) 
@@ -469,8 +462,8 @@ def main():
             ).sample[:, :4]
 
             if args.snr_gamma is None:
-                loss = F.mse_loss(model_pred.float(), target.float(), reduction="none")
-                loss = ((loss * masks).sum([1, 2, 3]) / masks.sum([1, 2, 3])).mean()
+                loss = F.mse_loss(model_pred.float(), target.float(), reduction="mean")
+                # loss = ((loss * masks).sum([1, 2, 3]) / masks.sum([1, 2, 3])).mean()
             else:
                 # Compute loss-weights as per Section 3.4 of https://arxiv.org/abs/2303.09556.
                 # Since we predict the noise instead of x_0, the original formulation is slightly changed.
@@ -485,7 +478,7 @@ def main():
                     mse_loss_weights = mse_loss_weights / (snr + 1)
 
                 loss = F.mse_loss(model_pred.float(), target.float(), reduction="none")
-                loss = ((loss * masks).sum([1, 2, 3]) / masks.sum([1, 2, 3]))
+                # loss = loss * masks
                 loss = loss.mean(dim=list(range(1, len(loss.shape)))) * mse_loss_weights
                 loss = loss.mean()
 
