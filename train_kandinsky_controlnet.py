@@ -364,7 +364,7 @@ def main():
     
     if accelerator.is_main_process:
         tracker_config = dict(vars(args))
-        accelerator.init_trackers("train_kandinsky_inpaint_controlnet", config=tracker_config)
+        accelerator.init_trackers("train_kandinsky_controlnet", config=tracker_config)
     
     image_encoder.to(accelerator.device, dtype=weight_dtype)
     movq.to(accelerator.device, dtype=weight_dtype)
