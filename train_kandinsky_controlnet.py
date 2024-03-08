@@ -213,7 +213,7 @@ from torchvision import transforms
 def make_train_dataset(path, image_processor, accelerator, args):
     dataset = load_dataset(path)
     column_names = dataset['train'].column_names
-    image_column, conditioning_image_column, caption_column = column_names
+    image_column, conditioning_image_column, mask_column, caption_column = column_names
 
     image_transforms = transforms.Compose(
         [
