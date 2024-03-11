@@ -1237,6 +1237,7 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin,
                 down_block_res_samples, down_block_additional_residuals
             ):
                 down_block_res_sample = down_block_res_sample + down_block_additional_residual
+                # down_block_res_sample = down_block_res_sample*0.8 + down_block_additional_residual*0.2 # middlek
                 new_down_block_res_samples = new_down_block_res_samples + (down_block_res_sample,)
 
             down_block_res_samples = new_down_block_res_samples
@@ -1265,6 +1266,7 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin,
 
         if is_controlnet:
             sample = sample + mid_block_additional_residual
+            # sample = sample*0.8 + mid_block_additional_residual*0.2 # middlek
 
         # 5. up
         for i, upsample_block in enumerate(self.up_blocks):

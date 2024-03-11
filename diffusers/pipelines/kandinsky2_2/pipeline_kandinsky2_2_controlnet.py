@@ -265,6 +265,7 @@ class KandinskyV22ControlnetPipeline(DiffusionPipeline):
             latent_model_input = torch.cat([latents] * 2) if do_classifier_free_guidance else latents
 
             added_cond_kwargs = {"image_embeds": image_embeds, "hint": hint}
+
             noise_pred = self.unet(
                 sample=latent_model_input,
                 timestep=t,

@@ -433,11 +433,11 @@ class KandinskyV22ControlnetInpaintPipeline(DiffusionPipeline):
         # middlek added
         if isinstance(hint, list):
             hint = torch.cat(hint, dim=0)
-
+            
         if self.do_classifier_free_guidance:
             image_embeds = image_embeds.repeat_interleave(num_images_per_prompt, dim=0)
             negative_image_embeds = negative_image_embeds.repeat_interleave(num_images_per_prompt, dim=0)
-            
+
             # middlek added
             hint = hint.repeat_interleave(num_images_per_prompt, dim=0)
 

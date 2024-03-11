@@ -1,5 +1,7 @@
 import argparse
 import os
+from PIL import Image
+from PIL.ImageOps import invert
 
 import accelerate
 import torch
@@ -15,28 +17,30 @@ from transformers.utils import ContextManagers
 
 from diffusers import DDPMScheduler, UNet2DConditionModel, VQModel, KandinskyV22PriorPipeline
 from diffusers.pipelines.kandinsky2_2.pipline_kandinsky2_2_controlnet_inpainting import KandinskyV22ControlnetInpaintPipeline
+from diffusers.training_utils import compute_snr
 
 import wandb
 
 def log_validation(image_encoder, movq, unet, accelerator, weight_dtype, args):
-    prior_pipeline = KandinskyV22PriorPipeline.from_pretrained(
-        args.prior_model_path, 
-        torch_dtype=torch.float16,
-        image_encoder=image_encoder,
-        use_safetensors=True)
-    pipeline = KandinskyV22ControlnetInpaintPipeline.from_pretrained(
-        args.decoder_model_path,
-        unet=accelerator.unwrap_model(unet),
-        movq=movq,
-        torch_dtype=weight_dtype,
-    )
-
-    hint_transforms = transforms.Compose(
+    image_transforms = transforms.Compose(
         [
             transforms.Resize(512, interpolation=transforms.InterpolationMode.BILINEAR),
             transforms.CenterCrop(512),
             transforms.ToTensor(),
         ]
+    )
+
+    prior_pipeline = KandinskyV22PriorPipeline.from_pretrained(
+        args.prior_model_path, 
+        image_encoder=image_encoder,
+        use_safetensors=True,
+        torch_dtype=torch.float16,
+    )
+    pipeline = KandinskyV22ControlnetInpaintPipeline.from_pretrained(
+        args.decoder_model_path,
+        unet=unet,
+        movq=movq,
+        torch_dtype=weight_dtype,
     )
 
     prior_pipeline = prior_pipeline.to(accelerator.device)
@@ -49,44 +53,57 @@ def log_validation(image_encoder, movq, unet, accelerator, weight_dtype, args):
     else:
         generator = torch.Generator(device=accelerator.device).manual_seed(args.seed)
 
-    images = []
-    for val_prompt, val_image, val_mask, val_hint in zip(args.val_prompts, args.val_images, args.val_masks, args.val_hints):
+    image_logs = []
+    for val_prompt, val_image, val_mask, val_cond in zip(args.val_prompts, args.val_images, args.val_masks, args.val_conds):
+        val_image = Image.open(val_image).convert("RGB")
+        val_mask = Image.open(val_mask).convert("L")
+        val_cond = Image.open(val_cond).convert("RGB")
+
+        if args.invert_mask == True:
+            val_mask = invert(val_mask)
+
         with torch.autocast("cuda"):
             prior_output = prior_pipeline(
                 prompt=val_prompt, 
-                negative_prompt="low quality",
+                negative_prompt="low quality, worst quality, wrinkled, deformed, distorted, jpeg artifacts,nsfw, paintings, sketches, text, watermark, username, spikey",
                 generator=generator
             )
             image = pipeline(image=val_image,
                             mask_image=val_mask,
-                            hint=hint_transforms(val_hint),
+                            hint=image_transforms(val_cond).unsqueeze(0),
                             **prior_output, 
                             height=512,
                             width=512, 
-                            num_inference_steps=20,
+                            num_inference_steps=50,
                             strength=1.0,
                             guidance_scale=4.0,
                             generator=generator).images[0]
-
-        images.append(image)
-
+        image_logs.append(
+            {"images": image, "validation_prompts": val_prompt, "validation_images": val_image, "validation_masks": val_mask, "validation_control": val_cond}
+        )
+        
     for tracker in accelerator.trackers:
         if tracker.name == "wandb":
-            tracker.log(
-                {
-                    "validation": [
-                        wandb.Image(image, caption=f"{i}: {args.validation_prompts[i]}")
-                        for i, image in enumerate(images)
-                    ]
-                }
-            )
+            formatted_images = []
 
+            for log in image_logs:
+                image = log["images"]
+                validation_prompt = log["validation_prompts"]
+                validation_image = log["validation_images"]
+                validation_mask = log["validation_masks"]
+                validation_control = log["validation_control"]
+                formatted_images.append(wandb.Image(validation_image, caption=validation_prompt))
+                formatted_images.append(wandb.Image(validation_mask, caption="mask"))
+                formatted_images.append(wandb.Image(validation_control, caption="object"))
+                formatted_images.append(wandb.Image(image, caption="result"))
+
+            tracker.log({"validation": formatted_images})
 
     del prior_pipeline
     del pipeline
     torch.cuda.empty_cache()
 
-    return images
+    return True
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Simple example of finetuning Kandinsky 2.2.")
@@ -105,9 +122,19 @@ def parse_args():
         help="Path to pretrained model or model identifier from huggingface.co/models.",
     )
     parser.add_argument(
+        "--init",
+        action="store_true",
+    )
+    parser.add_argument(
         "--train_data_dir",
         type=str,
         default=None,
+    )
+    parser.add_argument(
+        "--save_dir",
+        type=str,
+        default="./training",
+        required=False,
     )
     parser.add_argument(
         "--val_prompts",
@@ -128,7 +155,7 @@ def parse_args():
         nargs="+",
     )
     parser.add_argument(
-        "--val_hints",
+        "--val_conds",
         type=str,
         default=None,
         nargs="+",
@@ -137,7 +164,7 @@ def parse_args():
     parser.add_argument(
         "--batch_size", type=int, default=1, help="Batch size (per device) for the training dataloader."
     )
-    parser.add_argument("--epochs", type=int, default=100)
+    parser.add_argument("--epochs", type=int, default=5)
     parser.add_argument(
         "--lr",
         type=float,
@@ -162,7 +189,7 @@ def parse_args():
     parser.add_argument(
         "--report_to",
         type=str,
-        default="tensorboard",
+        default=None,
         help=(
             'The integration to report the results and logs to. Supported platforms are `"tensorboard"`'
             ' (default), `"wandb"` and `"comet_ml"`. Use `"all"` to report to all integrations.'
@@ -192,12 +219,21 @@ def parse_args():
         default=5,
         help="Run validation every X epochs.",
     )
+    parser.add_argument(
+        "--invert_mask",
+        action="store_true",
+    )
+    parser.add_argument(
+        "--snr_gamma",
+        type=float,
+        default=None,
+    )
 
     args = parser.parse_args()
     return args
 
 from torchvision import transforms
-def make_train_dataset(path, image_processor, accelerator):
+def make_train_dataset(path, image_processor, accelerator, args):
     dataset = load_dataset(path)
     column_names = dataset['train'].column_names
     image_column, conditioning_image_column, mask_column, caption_column = column_names
@@ -228,7 +264,11 @@ def make_train_dataset(path, image_processor, accelerator):
         conditioning_images = [image.convert("RGB") for image in examples[conditioning_image_column]]
         conditioning_images = [image_transforms(image) for image in conditioning_images]
 
-        masks = [mask.convert("L") for mask in examples[mask_column]]
+        masks = [
+            invert(mask.convert("L")) 
+            if args.invert_mask==True else mask.convert("L") 
+            for mask in examples[mask_column]
+        ]
         masks = [mask_transforms(mask) for mask in masks]
 
         examples["pixel_values"] = images
@@ -260,11 +300,17 @@ def collate_fn(examples):
             "condition_values": condition_values, "mask_values": mask_values}
 
 
+
 def main():
     args = parse_args()
 
+    cur_dir = os.path.dirname(os.path.abspath(__name__))
+    os.makedirs(os.path.join(cur_dir, "training"), exist_ok=True)
+    os.makedirs(os.path.join(cur_dir, "training", "log"), exist_ok=True)
+    
     accelerator_project_config = ProjectConfiguration(
-        total_limit=None, project_dir="logs", logging_dir="logs"
+        project_dir=os.path.join(cur_dir, "training"),
+        logging_dir=os.path.join(cur_dir, "training", "log")
     )
 
     accelerator = Accelerator(
@@ -305,7 +351,12 @@ def main():
         image_encoder = CLIPVisionModelWithProjection.from_pretrained(
             args.prior_model_path, subfolder="image_encoder", torch_dtype=weight_dtype
         ).eval()
-    unet = UNet2DConditionModel.from_pretrained(args.decoder_model_path, subfolder="unet")
+
+    if args.init == True:
+        unet = UNet2DConditionModel.from_config(os.path.join(args.decoder_model_path, "unet/config.json"))
+    else:
+        unet = UNet2DConditionModel.from_pretrained(args.decoder_model_path, subfolder="unet")
+        print(f"UNET loaded from {os.path.join(args.decoder_model_path, 'unet')}")
     
     movq.requires_grad_(False)
     image_encoder.requires_grad_(False)
@@ -313,7 +364,8 @@ def main():
 
     train_dataset = make_train_dataset(args.train_data_dir,
                                        image_processor=image_processor,
-                                       accelerator=accelerator)
+                                       accelerator=accelerator,
+                                       args=args)
     
     train_dataloader = torch.utils.data.DataLoader(
         train_dataset,
@@ -326,7 +378,7 @@ def main():
     if args.use_lr_scheduler:
         optimizer = torch.optim.AdamW(
             unet.parameters(),
-            lr=5e-06,
+            lr=8e-06,
             betas=(0.9, 0.999),
             weight_decay=1e-2,
             eps=1e-08,
@@ -349,6 +401,11 @@ def main():
         unet, optimizer, train_dataloader, lr_scheduler
     )
 
+    if accelerator.is_main_process:
+        tracker_config = dict(vars(args))
+        accelerator.init_trackers("train_kandinsky_inpaint_hint", config=tracker_config)
+    
+
     image_encoder.to(accelerator.device, dtype=weight_dtype)
     movq.to(accelerator.device, dtype=weight_dtype)
 
@@ -359,6 +416,15 @@ def main():
         disable=not accelerator.is_local_main_process,
     )
 
+    log_validation(
+        image_encoder=image_encoder,
+        movq=movq,
+        unet=unet,
+        accelerator=accelerator,
+        weight_dtype=weight_dtype,
+        args=args,
+    )
+   
     global_step = 0
     for epoch in range(args.epochs):
         train_loss = 0.0
@@ -366,30 +432,48 @@ def main():
             images = batch["pixel_values"].to(weight_dtype)
             masks = batch["mask_values"].to(weight_dtype)
             clip_images = batch["clip_pixel_values"].to(weight_dtype)
-            condition_images = batch["condition_values"].to(weight_dtype)
+            hint = batch["condition_values"].to(weight_dtype)
 
             images = movq.encode(images).latents
-            masked_images = images * masks
-            latents = torch.cat([images, masked_images, masks], dim=1)
-
             image_embeds = image_encoder(clip_images).image_embeds
-            hint = condition_images
+            masked_images = images * masks
 
-            noise = torch.randn_like(latents)
-            bsz = latents.shape[0]
-
-            timesteps = torch.randint(0, noise_scheduler.config.num_train_timesteps, (bsz,), device=latents.device)
+            bsz = images.shape[0]
+            timesteps = torch.randint(0, noise_scheduler.config.num_train_timesteps, (bsz,), device=images.device)
             timesteps = timesteps.long()
 
-            noisy_latents = noise_scheduler.add_noise(latents, noise, timesteps)
+            noise = torch.randn_like(images)
+            noisy_images = noise_scheduler.add_noise(images, noise, timesteps)
 
-            target = torch.randn_like(images)
+            latents = torch.cat([noisy_images, masked_images, masks], dim=1)
+
+            target = noise
 
             added_cond_kwargs = {"image_embeds": image_embeds, "hint": hint}
 
-            model_pred = unet(noisy_latents, timesteps, None, added_cond_kwargs=added_cond_kwargs).sample[:, :4]
+            model_pred = unet(latents, timesteps, None, added_cond_kwargs=added_cond_kwargs).sample[:, :4]
 
-            loss = F.mse_loss(model_pred.float(), target.float(), reduction="mean")
+            if args.snr_gamma is None:
+                loss = F.mse_loss(model_pred.float(), target.float(), reduction="none")
+                loss = ((loss * masks).sum([1, 2, 3]) / masks.sum([1, 2, 3])).mean()
+            else:
+                # Compute loss-weights as per Section 3.4 of https://arxiv.org/abs/2303.09556.
+                # Since we predict the noise instead of x_0, the original formulation is slightly changed.
+                # This is discussed in Section 4.2 of the same paper.
+                snr = compute_snr(noise_scheduler, timesteps)
+                mse_loss_weights = torch.stack([snr, args.snr_gamma * torch.ones_like(timesteps)], dim=1).min(
+                    dim=1
+                )[0]
+                if noise_scheduler.config.prediction_type == "epsilon":
+                    mse_loss_weights = mse_loss_weights / snr
+                elif noise_scheduler.config.prediction_type == "v_prediction":
+                    mse_loss_weights = mse_loss_weights / (snr + 1)
+
+                loss = F.mse_loss(model_pred.float(), target.float(), reduction="none")
+                # loss = loss * masks
+                loss = loss.mean(dim=list(range(1, len(loss.shape)))) * mse_loss_weights
+                loss = loss.mean()
+            
             avg_loss = accelerator.gather(loss.repeat(args.batch_size)).mean()
             train_loss += avg_loss.item()
             
@@ -416,17 +500,18 @@ def main():
                 
                 if args.val_prompts is not None and global_step % args.validation_step == 0:
                     log_validation(
-                        image_encoder,
-                        movq,
-                        unet,
-                        accelerator,
-                        weight_dtype,
-                        args,
+                        image_encoder=image_encoder,
+                        movq=movq,
+                        unet=unet,
+                        accelerator=accelerator,
+                        weight_dtype=weight_dtype,
+                        args=args,
                     )
 
             logs = {"step_loss": loss.detach().item(), "lr": lr_scheduler.get_last_lr()[0]}
             progress_bar.set_postfix(**logs)
-    
+            accelerator.log(logs, step=global_step)
+
     accelerator.wait_for_everyone()
     accelerator.end_training()
 

@@ -192,8 +192,8 @@ def prepare_mask_and_masked_image(image, mask, height, width):
             raise ValueError("Mask should be in [0, 1] range")
 
         # Binarize mask
-        mask[mask < 0.5] = 0
-        mask[mask >= 0.5] = 1
+        # mask[mask < 0.5] = 0
+        # mask[mask >= 0.5] = 1
 
         # Image as float32
         image = image.to(dtype=torch.float32)

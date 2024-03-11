@@ -375,7 +375,7 @@ def main():
     if args.use_lr_scheduler:
         optimizer = torch.optim.AdamW(
             controlnet.parameters(),
-            lr=1e-06,
+            lr=8e-06,
             betas=(0.9, 0.999),
             weight_decay=1e-2,
             eps=1e-08,
@@ -468,8 +468,8 @@ def main():
             ).sample[:, :4]
 
             if args.snr_gamma is None:
-                loss = F.mse_loss(model_pred.float(), target.float(), reduction="mean")
-                # loss = ((loss * masks).sum([1, 2, 3]) / masks.sum([1, 2, 3])).mean()
+                loss = F.mse_loss(model_pred.float(), target.float(), reduction="none")
+                loss = ((loss * masks).sum([1, 2, 3]) / masks.sum([1, 2, 3])).mean()
             else:
                 # Compute loss-weights as per Section 3.4 of https://arxiv.org/abs/2303.09556.
                 # Since we predict the noise instead of x_0, the original formulation is slightly changed.
