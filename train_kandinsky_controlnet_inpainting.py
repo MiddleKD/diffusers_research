@@ -361,6 +361,7 @@ def main():
     movq.requires_grad_(False)
     image_encoder.requires_grad_(False)
     unet.train()
+    unet.enable_gradient_checkpointing()
 
     train_dataset = make_train_dataset(args.train_data_dir,
                                        image_processor=image_processor,
@@ -492,7 +493,7 @@ def main():
             if accelerator.is_main_process:
                 if global_step % args.save_ckpt_step == 0:
                     if global_step % args.save_ckpt_step == 0:
-                        save_path = os.path.join("./training", f"checkpoint-{global_step}")
+                        save_path = os.path.join(args.save_dir, f"checkpoint-{global_step}")
                         os.makedirs(save_path,exist_ok=True)
 
                         unet = accelerator.unwrap_model(unet)
