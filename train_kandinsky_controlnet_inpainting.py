@@ -379,7 +379,7 @@ def main():
     if args.use_lr_scheduler:
         optimizer = torch.optim.AdamW(
             unet.parameters(),
-            lr=8e-06,
+            lr=2e-06,
             betas=(0.9, 0.999),
             weight_decay=1e-2,
             eps=1e-08,
@@ -471,7 +471,7 @@ def main():
                     mse_loss_weights = mse_loss_weights / (snr + 1)
 
                 loss = F.mse_loss(model_pred.float(), target.float(), reduction="none")
-                # loss = loss * masks
+                loss = loss * masks
                 loss = loss.mean(dim=list(range(1, len(loss.shape)))) * mse_loss_weights
                 loss = loss.mean()
             
