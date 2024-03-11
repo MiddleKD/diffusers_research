@@ -38,7 +38,7 @@ def log_validation(image_encoder, movq, unet, accelerator, weight_dtype, args):
     )
     pipeline = KandinskyV22ControlnetInpaintPipeline.from_pretrained(
         args.decoder_model_path,
-        unet=unet,
+        unet=accelerator.unwrap_model(unet),
         movq=movq,
         torch_dtype=weight_dtype,
     )
@@ -62,7 +62,7 @@ def log_validation(image_encoder, movq, unet, accelerator, weight_dtype, args):
         if args.invert_mask == True:
             val_mask = invert(val_mask)
 
-        with torch.autocast("cuda"):
+        with torch.autocast("cuda", torch.float16):
             prior_output = prior_pipeline(
                 prompt=val_prompt, 
                 negative_prompt="low quality, worst quality, wrinkled, deformed, distorted, jpeg artifacts,nsfw, paintings, sketches, text, watermark, username, spikey",
@@ -78,6 +78,7 @@ def log_validation(image_encoder, movq, unet, accelerator, weight_dtype, args):
                             strength=1.0,
                             guidance_scale=4.0,
                             generator=generator).images[0]
+
         image_logs.append(
             {"images": image, "validation_prompts": val_prompt, "validation_images": val_image, "validation_masks": val_mask, "validation_control": val_cond}
         )
@@ -361,7 +362,6 @@ def main():
     movq.requires_grad_(False)
     image_encoder.requires_grad_(False)
     unet.train()
-    unet.enable_gradient_checkpointing()
 
     train_dataset = make_train_dataset(args.train_data_dir,
                                        image_processor=image_processor,
