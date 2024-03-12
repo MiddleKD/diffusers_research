@@ -91,8 +91,8 @@ def downscale_height_and_width(height, width, scale_factor=8):
 def prepare_image(pil_image, w=512, h=512):
     pil_image = pil_image.resize((w, h), resample=Image.BICUBIC, reducing_gap=1)
     arr = np.array(pil_image.convert("RGB"))
-    # arr = arr.astype(np.float32) / 127.5 - 1
-    arr = arr.astype(np.float32) # middlek
+    arr = arr.astype(np.float32) / 127.5 - 1
+    # arr = arr.astype(np.float32) # middlek
     arr = np.transpose(arr, [2, 0, 1])
     image = torch.from_numpy(arr).unsqueeze(0)
     return image
@@ -420,7 +420,7 @@ class KandinskyV22ControlnetPipeline(DiffusionPipeline):
             raise ValueError(f"Only the output types `pt`, `pil` and `np` are supported not output_type={output_type}")
 
         if output_type in ["np", "pil"]:
-            # image = image * 0.5 + 0.5 # middlek
+            image = image * 0.5 + 0.5 # middlek
             image = image.clamp(0, 1)
             image = image.cpu().permute(0, 2, 3, 1).float().numpy()
 
