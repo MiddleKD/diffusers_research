@@ -104,6 +104,7 @@ def prepare_control_image(image, height, width):
                 transforms.Resize([height, width], interpolation=transforms.InterpolationMode.BILINEAR),
                 transforms.CenterCrop([height, width]),
                 transforms.ToTensor(),
+                transforms.Normalize([0.5], [0.5]),
             ]
         )
         
