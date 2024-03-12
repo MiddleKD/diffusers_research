@@ -35,7 +35,7 @@ from ...utils import (
     unscale_lora_layers,
 )
 from ...utils.torch_utils import is_compiled_module, randn_tensor
-from ..pipeline_utils import DiffusionPipeline
+from ..pipeline_utils import DiffusionPipeline, ImagePipelineOutput
 from ..stable_diffusion import StableDiffusionPipelineOutput
 from ..stable_diffusion.safety_checker import StableDiffusionSafetyChecker
 from .multicontrolnet import MultiControlNetModel
@@ -1312,15 +1312,16 @@ class StableDiffusionControlNetImg2ImgPipeline(
             image = self.vae.decode(latents / self.vae.config.scaling_factor, return_dict=False, generator=generator)[
                 0
             ]
-            image, has_nsfw_concept = self.run_safety_checker(image, device, prompt_embeds.dtype)
+            # image, has_nsfw_concept = self.run_safety_checker(image, device, prompt_embeds.dtype)
+            # has_nsfw_concept=None
         else:
             image = latents
-            has_nsfw_concept = None
+            # has_nsfw_concept = None
 
-        if has_nsfw_concept is None:
-            do_denormalize = [True] * image.shape[0]
-        else:
-            do_denormalize = [not has_nsfw for has_nsfw in has_nsfw_concept]
+        # if has_nsfw_concept is None:
+        do_denormalize = [True] * image.shape[0]
+        # else:
+        #     do_denormalize = [not has_nsfw for has_nsfw in has_nsfw_concept]
 
         image = self.image_processor.postprocess(image, output_type=output_type, do_denormalize=do_denormalize)
 
@@ -1328,6 +1329,6 @@ class StableDiffusionControlNetImg2ImgPipeline(
         self.maybe_free_model_hooks()
 
         if not return_dict:
-            return (image, has_nsfw_concept)
+            return (image,)
 
-        return StableDiffusionPipelineOutput(images=image, nsfw_content_detected=has_nsfw_concept)
+        return ImagePipelineOutput(images=image)

@@ -775,3 +775,7 @@ def make_background(image_size, color_rgb=[255,255,255], noise=0.1):
 
     image = Image.fromarray(image_array, 'RGB')
     return image
+
+def dilate_mask(mask):
+    dilated_mask = cv2.dilate(np.array(mask.convert("L")), np.ones((5,5)), iterations=5)
+    return Image.fromarray(dilated_mask)
