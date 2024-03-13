@@ -27,7 +27,6 @@ def log_validation(image_encoder, movq, unet, accelerator, weight_dtype, args):
             transforms.Resize(512, interpolation=transforms.InterpolationMode.BILINEAR),
             transforms.CenterCrop(512),
             transforms.ToTensor(),
-            transforms.Normalize([0.5], [0.5]),
         ]
     )
 
