@@ -244,7 +244,7 @@ def make_train_dataset(path, image_processor, accelerator, args):
             transforms.Resize(512, interpolation=transforms.InterpolationMode.BILINEAR),
             transforms.CenterCrop(512),
             transforms.ToTensor(),
-            transforms.Normalize([0.5], [0.5]),
+            transforms.Normalize([0.4], [0.3]),
         ]
     )
 
@@ -418,14 +418,14 @@ def main():
         disable=not accelerator.is_local_main_process,
     )
 
-    log_validation(
-        image_encoder=image_encoder,
-        movq=movq,
-        unet=unet,
-        accelerator=accelerator,
-        weight_dtype=weight_dtype,
-        args=args,
-    )
+    # log_validation(
+    #     image_encoder=image_encoder,
+    #     movq=movq,
+    #     unet=unet,
+    #     accelerator=accelerator,
+    #     weight_dtype=weight_dtype,
+    #     args=args,
+    # )
    
     global_step = 0
     for epoch in range(args.epochs):
@@ -446,15 +446,18 @@ def main():
 
             noise = torch.randn_like(images)
             noisy_images = noise_scheduler.add_noise(images, noise, timesteps)
-
+            
             latents = torch.cat([noisy_images, masked_images, masks], dim=1)
-
+            
             target = noise
 
             added_cond_kwargs = {"image_embeds": image_embeds, "hint": hint}
-
-            model_pred = unet(latents, timesteps, None, added_cond_kwargs=added_cond_kwargs).sample[:, :4]
-
+            
+            model_pred = unet(sample=latents, 
+                              timestep=timesteps, 
+                              encoder_hidden_states=None, 
+                              added_cond_kwargs=added_cond_kwargs).sample[:, :4]
+            
             if args.snr_gamma is None:
                 loss = F.mse_loss(model_pred.float(), target.float(), reduction="none")
                 loss = ((loss * masks).sum([1, 2, 3]) / masks.sum([1, 2, 3])).mean()

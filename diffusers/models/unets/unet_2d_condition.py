@@ -1175,7 +1175,7 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin,
         
         # 2. pre-process
         sample = self.conv_in(sample)
-
+        
         # 2.5 GLIGEN position net
         if cross_attention_kwargs is not None and cross_attention_kwargs.get("gligen", None) is not None:
             cross_attention_kwargs = cross_attention_kwargs.copy()
@@ -1267,7 +1267,7 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin,
         if is_controlnet:
             sample = sample + mid_block_additional_residual
             # sample = sample*0.8 + mid_block_additional_residual*0.2 # middlek
-
+        
         # 5. up
         for i, upsample_block in enumerate(self.up_blocks):
             is_final_block = i == len(self.up_blocks) - 1
@@ -1299,18 +1299,18 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin,
                     upsample_size=upsample_size,
                     scale=lora_scale,
                 )
-
+        
         # 6. post-process
         if self.conv_norm_out:
             sample = self.conv_norm_out(sample)
             sample = self.conv_act(sample)
         sample = self.conv_out(sample)
-
+        
         if USE_PEFT_BACKEND:
             # remove `lora_scale` from each PEFT layer
             unscale_lora_layers(self, lora_scale)
-
+        
         if not return_dict:
             return (sample,)
-
+        
         return UNet2DConditionOutput(sample=sample)
