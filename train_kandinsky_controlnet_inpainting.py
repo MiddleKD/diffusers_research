@@ -418,14 +418,14 @@ def main():
         disable=not accelerator.is_local_main_process,
     )
 
-    # log_validation(
-    #     image_encoder=image_encoder,
-    #     movq=movq,
-    #     unet=unet,
-    #     accelerator=accelerator,
-    #     weight_dtype=weight_dtype,
-    #     args=args,
-    # )
+    log_validation(
+        image_encoder=image_encoder,
+        movq=movq,
+        unet=unet,
+        accelerator=accelerator,
+        weight_dtype=weight_dtype,
+        args=args,
+    )
    
     global_step = 0
     for epoch in range(args.epochs):
