@@ -511,8 +511,10 @@ def main():
             if accelerator.is_main_process:
                 if global_step % args.save_ckpt_step == 0:
                     if global_step % args.save_ckpt_step == 0:
-                        if len(os.listdir(args.save_dirs)) >= args.max_save_ckpt_num:
-                            oldest_ckpt_dir = min(os.listdir(args.save_dir), key=lambda x: os.path.getctime(os.path.join(args.save_dir, x)))
+                        checkpoint_dirs = [d for d in os.listdir(args.save_dir) if os.path.isdir(os.path.join(args.save_dir, d)) and d.startswith('checkpoint')]
+
+                        if len(checkpoint_dirs) >= args.max_save_ckpt_num:
+                            oldest_ckpt_dir = min(checkpoint_dirs, key=lambda x: os.path.getctime(os.path.join(args.save_dir, x)))
                             shutil.rmtree(os.path.join(args.save_dir, oldest_ckpt_dir))
 
                         save_path = os.path.join(args.save_dir, f"checkpoint-{global_step}")
