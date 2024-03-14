@@ -1,5 +1,6 @@
 import argparse
 import os
+import shutil
 from PIL import Image
 from PIL.ImageOps import invert
 
@@ -206,6 +207,11 @@ def parse_args():
         ),
     )
     parser.add_argument(
+        "--max_save_ckpt_num",
+        type=int,
+        default=3,
+    )
+    parser.add_argument(
         "--resume_ckpt_path",
         type=str,
         default=None,
@@ -363,6 +369,14 @@ def main():
     movq.requires_grad_(False)
     image_encoder.requires_grad_(False)
     unet.train()
+    for name, param in unet.named_parameters():
+        if "input_hint_block" in name:
+            param.requires_grad_(True)
+        elif "conv_in.weight" == name:
+            param.requires_grad_(True)
+        else:
+            param.requires_grad_(False)
+
 
     train_dataset = make_train_dataset(args.train_data_dir,
                                        image_processor=image_processor,
@@ -380,7 +394,7 @@ def main():
     if args.use_lr_scheduler:
         optimizer = torch.optim.AdamW(
             unet.parameters(),
-            lr=2e-06,
+            lr=1e-05,
             betas=(0.9, 0.999),
             weight_decay=1e-2,
             eps=1e-08,
@@ -497,6 +511,10 @@ def main():
             if accelerator.is_main_process:
                 if global_step % args.save_ckpt_step == 0:
                     if global_step % args.save_ckpt_step == 0:
+                        if len(os.listdir(args.save_dirs)) >= args.max_save_ckpt_num:
+                            oldest_ckpt_dir = min(os.listdir(args.save_dir), key=lambda x: os.path.getctime(os.path.join(args.save_dir, x)))
+                            shutil.rmtree(os.path.join(args.save_dir, oldest_ckpt_dir))
+
                         save_path = os.path.join(args.save_dir, f"checkpoint-{global_step}")
                         os.makedirs(save_path,exist_ok=True)
 
