@@ -17,20 +17,13 @@ from transformers import CLIPImageProcessor, CLIPVisionModelWithProjection
 from transformers.utils import ContextManagers
 
 from diffusers import DDPMScheduler, UNet2DConditionModel, VQModel, KandinskyV22PriorPipeline
-from diffusers.pipelines.kandinsky2_2.pipline_kandinsky2_2_controlnet_inpainting import KandinskyV22ControlnetInpaintPipeline
+from diffusers.pipelines.kandinsky2_2.pipline_kandinsky2_2_controlnet_inpainting_split import KandinskyV22ControlnetInpaintPipeline
+from diffusers.models.controlnet_kandinsky import ControlNetModel
 from diffusers.training_utils import compute_snr
 
 import wandb
 
-def log_validation(image_encoder, movq, unet, accelerator, weight_dtype, args):
-    image_transforms = transforms.Compose(
-        [
-            transforms.Resize(512, interpolation=transforms.InterpolationMode.BILINEAR),
-            transforms.CenterCrop(512),
-            transforms.ToTensor(),
-        ]
-    )
-
+def log_validation(image_encoder, movq, unet, controlnet, accelerator, weight_dtype, args):
     prior_pipeline = KandinskyV22PriorPipeline.from_pretrained(
         args.prior_model_path, 
         image_encoder=image_encoder,
@@ -39,8 +32,9 @@ def log_validation(image_encoder, movq, unet, accelerator, weight_dtype, args):
     )
     pipeline = KandinskyV22ControlnetInpaintPipeline.from_pretrained(
         args.decoder_model_path,
-        unet=accelerator.unwrap_model(unet),
+        unet=unet,
         movq=movq,
+        controlnet=accelerator.unwrap_model(controlnet),
         torch_dtype=weight_dtype,
     )
 
@@ -62,8 +56,8 @@ def log_validation(image_encoder, movq, unet, accelerator, weight_dtype, args):
 
         if args.invert_mask == True:
             val_mask = invert(val_mask)
-
-        with torch.autocast("cuda", torch.float16):
+        
+        with torch.autocast("cuda"):
             prior_output = prior_pipeline(
                 prompt=val_prompt, 
                 negative_prompt="low quality, worst quality, wrinkled, deformed, distorted, jpeg artifacts,nsfw, paintings, sketches, text, watermark, username, spikey",
@@ -71,7 +65,7 @@ def log_validation(image_encoder, movq, unet, accelerator, weight_dtype, args):
             )
             image = pipeline(image=val_image,
                             mask_image=val_mask,
-                            hint=image_transforms(val_cond).unsqueeze(0),
+                            control_image=val_cond,
                             **prior_output, 
                             height=512,
                             width=512, 
@@ -79,7 +73,6 @@ def log_validation(image_encoder, movq, unet, accelerator, weight_dtype, args):
                             strength=1.0,
                             guidance_scale=4.0,
                             generator=generator).images[0]
-
         image_logs.append(
             {"images": image, "validation_prompts": val_prompt, "validation_images": val_image, "validation_masks": val_mask, "validation_control": val_cond}
         )
@@ -308,7 +301,6 @@ def collate_fn(examples):
             "condition_values": condition_values, "mask_values": mask_values}
 
 
-
 def main():
     args = parse_args()
 
@@ -359,24 +351,20 @@ def main():
         image_encoder = CLIPVisionModelWithProjection.from_pretrained(
             args.prior_model_path, subfolder="image_encoder", torch_dtype=weight_dtype
         ).eval()
+        unet = UNet2DConditionModel.from_pretrained(
+            args.decoder_model_path, subfolder="unet"
+        ).eval()
 
     if args.init == True:
-        unet = UNet2DConditionModel.from_config(os.path.join(args.decoder_model_path, "unet/config.json"))
+        controlnet = ControlNetModel.from_config(os.path.join(args.decoder_model_path, "controlnet/config.json"))
     else:
-        unet = UNet2DConditionModel.from_pretrained(args.decoder_model_path, subfolder="unet")
-        print(f"UNET loaded from {os.path.join(args.decoder_model_path, 'unet')}")
-    
+        controlnet = ControlNetModel.from_pretrained(args.decoder_model_path, subfolder="controlnet")
+        print(f"Controlnet loaded from {os.path.join(args.decoder_model_path, 'controlnet')}")
+
     movq.requires_grad_(False)
     image_encoder.requires_grad_(False)
-    unet.train()
-    for name, param in unet.named_parameters():
-        if "input_hint_block" in name:
-            param.requires_grad_(True)
-        elif "conv_in.weight" == name:
-            param.requires_grad_(True)
-        else:
-            param.requires_grad_(False)
-
+    unet.requires_grad_(False)
+    controlnet.train()
 
     train_dataset = make_train_dataset(args.train_data_dir,
                                        image_processor=image_processor,
@@ -393,8 +381,8 @@ def main():
     
     if args.use_lr_scheduler:
         optimizer = torch.optim.AdamW(
-            unet.parameters(),
-            lr=1e-05,
+            controlnet.parameters(),
+            lr=2e-06,
             betas=(0.9, 0.999),
             weight_decay=1e-2,
             eps=1e-08,
@@ -403,7 +391,7 @@ def main():
         lr_scheduler = CosineAnnealingWarmUpRestarts(optimizer, T_0=10000, T_mult=1, eta_max=args.lr,  T_up=100, gamma=1)
     else:
         optimizer = torch.optim.AdamW(
-                unet.parameters(),
+                controlnet.parameters(),
                 lr=args.lr,
                 betas=(0.9, 0.999),
                 weight_decay=1e-2,
@@ -413,17 +401,17 @@ def main():
         lr_scheduler = LambdaLR(optimizer, lambda _: 1, last_epoch=-1)
 
 
-    unet, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
-        unet, optimizer, train_dataloader, lr_scheduler
+    controlnet, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
+        controlnet, optimizer, train_dataloader, lr_scheduler
     )
-
+    
     if accelerator.is_main_process:
         tracker_config = dict(vars(args))
-        accelerator.init_trackers("train_kandinsky_inpaint_hint", config=tracker_config)
+        accelerator.init_trackers("train_kandinsky_inpaint_controlnet", config=tracker_config)
     
-
     image_encoder.to(accelerator.device, dtype=weight_dtype)
     movq.to(accelerator.device, dtype=weight_dtype)
+    unet.to(accelerator.device, dtype=weight_dtype)
 
     progress_bar = tqdm(
         range(0, len(train_dataset) * args.epochs),
@@ -436,11 +424,12 @@ def main():
         image_encoder=image_encoder,
         movq=movq,
         unet=unet,
+        controlnet=controlnet,
         accelerator=accelerator,
         weight_dtype=weight_dtype,
         args=args,
     )
-   
+
     global_step = 0
     for epoch in range(args.epochs):
         train_loss = 0.0
@@ -448,7 +437,7 @@ def main():
             images = batch["pixel_values"].to(weight_dtype)
             masks = batch["mask_values"].to(weight_dtype)
             clip_images = batch["clip_pixel_values"].to(weight_dtype)
-            hint = batch["condition_values"].to(weight_dtype)
+            condition_images = batch["condition_values"].to(weight_dtype)
 
             images = movq.encode(images).latents
             image_embeds = image_encoder(clip_images).image_embeds
@@ -460,21 +449,34 @@ def main():
 
             noise = torch.randn_like(images)
             noisy_images = noise_scheduler.add_noise(images, noise, timesteps)
-            
+
             latents = torch.cat([noisy_images, masked_images, masks], dim=1)
-            
+
             target = noise
 
-            added_cond_kwargs = {"image_embeds": image_embeds, "hint": hint}
-            
-            model_pred = unet(sample=latents, 
-                              timestep=timesteps, 
-                              encoder_hidden_states=None, 
-                              added_cond_kwargs=added_cond_kwargs).sample[:, :4]
-            
+            added_cond_kwargs = {"image_embeds": image_embeds}
+
+            down_block_res_samples, mid_block_res_sample = controlnet(
+                sample=latents,
+                timestep=timesteps,
+                encoder_hidden_states=None,
+                controlnet_cond=condition_images,
+                added_cond_kwargs=added_cond_kwargs,
+                return_dict=False,
+            )
+
+            model_pred = unet(
+                sample=latents,
+                timestep=timesteps,
+                encoder_hidden_states=None,
+                down_block_additional_residuals=[cur.to(weight_dtype) for cur in down_block_res_samples],
+                mid_block_additional_residual=mid_block_res_sample.to(weight_dtype),
+                added_cond_kwargs=added_cond_kwargs
+            ).sample[:, :4]
+
             if args.snr_gamma is None:
-                loss = F.mse_loss(model_pred.float(), target.float(), reduction="none")
-                loss = ((loss * masks).sum([1, 2, 3]) / masks.sum([1, 2, 3])).mean()
+                loss = F.mse_loss(model_pred.float(), target.float(), reduction="mean")
+                # loss = ((loss * masks).sum([1, 2, 3]) / masks.sum([1, 2, 3])).mean()
             else:
                 # Compute loss-weights as per Section 3.4 of https://arxiv.org/abs/2303.09556.
                 # Since we predict the noise instead of x_0, the original formulation is slightly changed.
@@ -489,16 +491,16 @@ def main():
                     mse_loss_weights = mse_loss_weights / (snr + 1)
 
                 loss = F.mse_loss(model_pred.float(), target.float(), reduction="none")
-                loss = loss * masks
+                # loss = loss * masks
                 loss = loss.mean(dim=list(range(1, len(loss.shape)))) * mse_loss_weights
                 loss = loss.mean()
-            
+
             avg_loss = accelerator.gather(loss.repeat(args.batch_size)).mean()
             train_loss += avg_loss.item()
             
             accelerator.backward(loss)
             if accelerator.sync_gradients:
-                accelerator.clip_grad_norm_(unet.parameters(), 1.0)
+                accelerator.clip_grad_norm_(controlnet.parameters(), 1.0)
             optimizer.step()
             lr_scheduler.step()
             optimizer.zero_grad()
@@ -520,14 +522,15 @@ def main():
                         save_path = os.path.join(args.save_dir, f"checkpoint-{global_step}")
                         os.makedirs(save_path,exist_ok=True)
 
-                        unet = accelerator.unwrap_model(unet)
-                        torch.save(unet.state_dict(), os.path.join(save_path, f"unet_{epoch}.pth"))
+                        controlnet = accelerator.unwrap_model(controlnet)
+                        torch.save(controlnet.state_dict(), os.path.join(save_path, f"controlnet_{epoch}.pth"))
                 
                 if args.val_prompts is not None and global_step % args.validation_step == 0:
                     log_validation(
                         image_encoder=image_encoder,
                         movq=movq,
                         unet=unet,
+                        controlnet=controlnet,
                         accelerator=accelerator,
                         weight_dtype=weight_dtype,
                         args=args,
@@ -536,7 +539,7 @@ def main():
             logs = {"step_loss": loss.detach().item(), "lr": lr_scheduler.get_last_lr()[0]}
             progress_bar.set_postfix(**logs)
             accelerator.log(logs, step=global_step)
-
+    
     accelerator.wait_for_everyone()
     accelerator.end_training()
 
