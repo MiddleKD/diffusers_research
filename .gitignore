@@ -8,6 +8,7 @@ image/
 output/
 advertise/
 template/
+caption_dict.json
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
