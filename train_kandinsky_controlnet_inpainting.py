@@ -414,7 +414,7 @@ def main():
     unet.to(accelerator.device, dtype=weight_dtype)
 
     progress_bar = tqdm(
-        range(0, len(train_dataset) * args.epochs),
+        range(0, len(train_dataset) / args.batch_size * args.epochs),
         initial=0,
         desc="Steps",
         disable=not accelerator.is_local_main_process,
