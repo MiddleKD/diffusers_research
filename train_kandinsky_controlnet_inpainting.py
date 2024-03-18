@@ -475,8 +475,8 @@ def main():
             ).sample[:, :4]
 
             if args.snr_gamma is None:
-                loss = F.mse_loss(model_pred.float(), target.float(), reduction="mean")
-                # loss = ((loss * masks).sum([1, 2, 3]) / masks.sum([1, 2, 3])).mean()
+                loss = F.mse_loss(model_pred.float(), target.float(), reduction="none")
+                loss = ((loss * masks).sum([1, 2, 3]) / masks.sum([1, 2, 3])).mean()
             else:
                 # Compute loss-weights as per Section 3.4 of https://arxiv.org/abs/2303.09556.
                 # Since we predict the noise instead of x_0, the original formulation is slightly changed.
@@ -491,7 +491,7 @@ def main():
                     mse_loss_weights = mse_loss_weights / (snr + 1)
 
                 loss = F.mse_loss(model_pred.float(), target.float(), reduction="none")
-                # loss = loss * masks
+                loss = loss * masks
                 loss = loss.mean(dim=list(range(1, len(loss.shape)))) * mse_loss_weights
                 loss = loss.mean()
 

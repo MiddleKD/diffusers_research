@@ -48,6 +48,7 @@ from .unets.unet_2d_blocks import (
     UNetMidBlock2D,
     UNetMidBlock2DCrossAttn,
     SimpleCrossAttnDownBlock2D,
+    UNetMidBlock2DSimpleCrossAttn,
     get_down_block,
 )
 from .unets.unet_2d_condition import UNet2DConditionModel
@@ -249,6 +250,7 @@ class ControlNetModel(ModelMixin, ConfigMixin, FromOriginalControlNetMixin):
         conditioning_embedding_out_channels: Optional[Tuple[int, ...]] = (16, 32, 96, 256),
         global_pool_conditions: bool = False,
         addition_embed_type_num_heads: int = 64,
+        project_out_channels_for_other_architecture: Union[Tuple[int, ...], None] = None
     ):
         super().__init__()
 
@@ -376,8 +378,12 @@ class ControlNetModel(ModelMixin, ConfigMixin, FromOriginalControlNetMixin):
             conditioning_channels=conditioning_channels,
         )
 
+        self.is_project_other_architecture = project_out_channels_for_other_architecture is not None
+
         self.down_blocks = nn.ModuleList([])
         self.controlnet_down_blocks = nn.ModuleList([])
+        if self.is_project_other_architecture:
+            self.controlnet_proj_blocks = nn.ModuleList([]) # middlek
         
         # down
         output_channel = block_out_channels[0]
@@ -385,10 +391,18 @@ class ControlNetModel(ModelMixin, ConfigMixin, FromOriginalControlNetMixin):
         controlnet_block = nn.Conv2d(output_channel, output_channel, kernel_size=1)
         controlnet_block = zero_module(controlnet_block)
         self.controlnet_down_blocks.append(controlnet_block)
+        
+        if self.is_project_other_architecture:
+            proj_channel = project_out_channels_for_other_architecture[0] # middlek
+            proj_block = nn.Conv2d(output_channel, proj_channel, kernel_size=1) # middlek
+            proj_block = zero_module(proj_block) # middlek
+            self.controlnet_proj_blocks.append(proj_block) # middlek
 
         for i, down_block_type in enumerate(down_block_types):
             input_channel = output_channel
             output_channel = block_out_channels[i]
+            if self.is_project_other_architecture:
+                proj_channel = project_out_channels_for_other_architecture[i] # middlek
             is_final_block = i == len(block_out_channels) - 1
 
             down_block = get_down_block(
@@ -424,17 +438,35 @@ class ControlNetModel(ModelMixin, ConfigMixin, FromOriginalControlNetMixin):
                 controlnet_block = zero_module(controlnet_block)
                 self.controlnet_down_blocks.append(controlnet_block)
 
+                if self.is_project_other_architecture:
+                    proj_block = nn.Conv2d(output_channel, proj_channel, kernel_size=1) # middlek
+                    proj_block = zero_module(proj_block) # middlek
+                    self.controlnet_proj_blocks.append(proj_block) # middlek
+
             if not is_final_block:
                 controlnet_block = nn.Conv2d(output_channel, output_channel, kernel_size=1)
                 controlnet_block = zero_module(controlnet_block)
                 self.controlnet_down_blocks.append(controlnet_block)
 
+                if self.is_project_other_architecture:
+                    proj_block = nn.Conv2d(output_channel, proj_channel, kernel_size=1) # middlek
+                    proj_block = zero_module(proj_block) # middlek
+                    self.controlnet_proj_blocks.append(proj_block) # middlek
+
+
         # mid
         mid_block_channel = block_out_channels[-1]
+        if self.is_project_other_architecture:
+            mid_proj_block = project_out_channels_for_other_architecture[-1]
 
         controlnet_block = nn.Conv2d(mid_block_channel, mid_block_channel, kernel_size=1)
         controlnet_block = zero_module(controlnet_block)
         self.controlnet_mid_block = controlnet_block
+
+        if self.is_project_other_architecture:
+            proj_block = nn.Conv2d(mid_block_channel, mid_proj_block, kernel_size=1) # middlek
+            proj_block = zero_module(proj_block) # middlek
+            self.controlnet_mid_proj_block = proj_block # middlek
 
         if mid_block_type == "UNetMidBlock2DCrossAttn":
             self.mid_block = UNetMidBlock2DCrossAttn(
@@ -462,6 +494,22 @@ class ControlNetModel(ModelMixin, ConfigMixin, FromOriginalControlNetMixin):
                 resnet_groups=norm_num_groups,
                 resnet_time_scale_shift=resnet_time_scale_shift,
                 add_attention=False,
+            )
+        elif mid_block_type == "UNetMidBlock2DSimpleCrossAttn":
+            self.mid_block = UNetMidBlock2DSimpleCrossAttn(
+                in_channels=in_channels,
+                temb_channels=time_embed_dim,
+                dropout=dropout,
+                resnet_eps=norm_eps,
+                resnet_act_fn=act_fn,
+                output_scale_factor=mid_block_scale_factor,
+                cross_attention_dim=cross_attention_dim,
+                attention_head_dim=attention_head_dim,
+                resnet_groups=norm_num_groups,
+                resnet_time_scale_shift=resnet_time_scale_shift,
+                skip_time_act=resnet_skip_time_act,
+                only_cross_attention=mid_block_only_cross_attention,
+                cross_attention_norm=cross_attention_norm,
             )
         else:
             raise ValueError(f"unknown mid_block_type : {mid_block_type}")
@@ -1106,14 +1154,20 @@ class ControlNetModel(ModelMixin, ConfigMixin, FromOriginalControlNetMixin):
         # 5. Control net blocks
 
         controlnet_down_block_res_samples = ()
-
-        for down_block_res_sample, controlnet_block in zip(down_block_res_samples, self.controlnet_down_blocks):
-            down_block_res_sample = controlnet_block(down_block_res_sample)
-            controlnet_down_block_res_samples = controlnet_down_block_res_samples + (down_block_res_sample,)
+        if self.is_project_other_architecture:
+            for down_block_res_sample, controlnet_block, controlnet_proj_block in zip(down_block_res_samples, self.controlnet_down_blocks, self.controlnet_proj_blocks): # middlek
+                down_block_res_sample = controlnet_block(down_block_res_sample)
+                down_block_res_sample = controlnet_proj_block(down_block_res_sample) # middlek
+                controlnet_down_block_res_samples = controlnet_down_block_res_samples + (down_block_res_sample,)
+        else:
+            for down_block_res_sample, controlnet_block in zip(down_block_res_samples, self.controlnet_down_blocks):
+                down_block_res_sample = controlnet_block(down_block_res_sample)
+                controlnet_down_block_res_samples = controlnet_down_block_res_samples + (down_block_res_sample,)
 
         down_block_res_samples = controlnet_down_block_res_samples
 
         mid_block_res_sample = self.controlnet_mid_block(sample)
+        mid_block_res_sample = self.controlnet_mid_proj_block(mid_block_res_sample)
 
         # 6. scaling
         if guess_mode and not self.config.global_pool_conditions:

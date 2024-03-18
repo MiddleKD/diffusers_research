@@ -57,7 +57,8 @@ def log_validation(image_encoder, movq, unet, controlnet, accelerator, weight_dt
                 negative_prompt="low quality, worst quality, wrinkled, deformed, distorted, jpeg artifacts,nsfw, paintings, sketches, text, watermark, username, spikey",
                 generator=generator
             )
-            image = pipeline(image=val_cond,
+            image = pipeline(image=None,
+                            #  image=val_cond,
                             control_image=val_cond,
                             **prior_output, 
                             height=512,
