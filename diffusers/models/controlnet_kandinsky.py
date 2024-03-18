@@ -1167,7 +1167,8 @@ class ControlNetModel(ModelMixin, ConfigMixin, FromOriginalControlNetMixin):
         down_block_res_samples = controlnet_down_block_res_samples
 
         mid_block_res_sample = self.controlnet_mid_block(sample)
-        mid_block_res_sample = self.controlnet_mid_proj_block(mid_block_res_sample)
+        if self.is_project_other_architecture:
+            mid_block_res_sample = self.controlnet_mid_proj_block(mid_block_res_sample)
 
         # 6. scaling
         if guess_mode and not self.config.global_pool_conditions:
