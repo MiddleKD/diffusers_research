@@ -549,7 +549,7 @@ class KandinskyV22ControlnetPipeline(DiffusionPipeline):
                 conditioning_scale=controlnet_scale,
                 return_dict=False,
             )
-            
+
             added_cond_kwargs = {"image_embeds": image_embeds}
             noise_pred = self.unet(
                 sample=latent_model_input,
@@ -599,7 +599,7 @@ class KandinskyV22ControlnetPipeline(DiffusionPipeline):
             image = image * 0.5 + 0.5 # middlek
             image = image.clamp(0, 1)
             image = image.cpu().permute(0, 2, 3, 1).float().numpy()
-
+        
         if output_type == "pil":
             image = self.numpy_to_pil(image)
 

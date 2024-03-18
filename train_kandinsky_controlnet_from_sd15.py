@@ -264,9 +264,11 @@ def collate_fn(examples):
     
     condition_values = torch.stack([example["condition_values"] for example in examples])
     condition_values = condition_values.to(memory_format=torch.contiguous_format).float()
+
+    input_ids = torch.tensor([example["input_ids"] for example in examples], dtype=torch.long)
     
     return {"pixel_values": pixel_values, "clip_pixel_values": clip_pixel_values,
-            "condition_values": condition_values}
+            "condition_values": condition_values, "input_ids": input_ids,}
 
 
 def main():
@@ -391,7 +393,7 @@ def main():
     
     if accelerator.is_main_process:
         tracker_config = dict(vars(args))
-        accelerator.init_trackers("train_kandinsky_controlnet_bad", config=tracker_config)
+        accelerator.init_trackers("train_kandinsky_controlnet_from_sd15", config=tracker_config)
     
     image_encoder.to(accelerator.device, dtype=weight_dtype)
     movq.to(accelerator.device, dtype=weight_dtype)
@@ -423,7 +425,7 @@ def main():
             images = batch["pixel_values"].to(weight_dtype)
             clip_images = batch["clip_pixel_values"].to(weight_dtype)
             condition_images = batch["condition_values"].to(weight_dtype)
-            contexts = text_encoder(batch['input_ids']).to(weight_dtype)
+            contexts = text_encoder(batch['input_ids'])[0]
 
             images = movq.encode(images).latents
             image_embeds = image_encoder(clip_images).image_embeds
