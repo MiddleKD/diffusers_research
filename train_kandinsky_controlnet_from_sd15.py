@@ -343,13 +343,13 @@ def main():
     text_encoder.requires_grad_(False)
     controlnet.train()
 
-    with open("./sd15_target_layers.jsonl", mode="r") as f:
-        target_layers = [cur[:-1] for cur in f]
-    for name, param in controlnet.named_parameters():
-        if name in target_layers:
-            param.requires_grad_(True)
-        else:
-            param.requires_grad_(False)
+    # with open("./sd15_target_layers.jsonl", mode="r") as f:
+    #     target_layers = [cur[:-1] for cur in f]
+    # for name, param in controlnet.named_parameters():
+    #     if name in target_layers:
+    #         param.requires_grad_(True)
+    #     else:
+    #         param.requires_grad_(False)
 
     train_dataset = make_train_dataset(args.train_data_dir,
                                        image_processor=image_processor,
