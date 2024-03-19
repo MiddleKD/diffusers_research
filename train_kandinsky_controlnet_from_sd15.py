@@ -17,7 +17,7 @@ from transformers.utils import ContextManagers
 
 from diffusers import DDPMScheduler, UNet2DConditionModel, VQModel, KandinskyV22PriorPipeline
 from diffusers.pipelines.kandinsky2_2.pipline_kandinsky2_2_controlnet_text import KandinskyV22ControlnetPipeline
-from diffusers.models.controlnet_kandinsky import ControlNetModel
+from diffusers.models.controlnet_kandinsky_from_sd15 import ControlNetModel
 from diffusers.training_utils import compute_snr
 
 import wandb
