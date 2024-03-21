@@ -1,5 +1,5 @@
-diffusers_naive/
-diffusers_parents/
+copy/
+diffusers_parents
 pychache/
 Favorfit_*/
 wandb/
@@ -8,6 +8,7 @@ image/
 output/
 advertise/
 template/
+*.pyc
 # caption_dict.json
 
 # Byte-compiled / optimized / DLL files
