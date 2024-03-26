@@ -215,7 +215,7 @@ class UNet2DConditionLoadersMixin:
 
         # fill attn processors
         lora_layers_list = []
-
+        print(USE_PEFT_BACKEND)
         is_lora = all(("lora" in k or k.endswith(".alpha")) for k in state_dict.keys()) and not USE_PEFT_BACKEND
         is_custom_diffusion = any("custom_diffusion" in k for k in state_dict.keys())
 

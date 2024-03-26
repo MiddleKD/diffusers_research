@@ -335,10 +335,10 @@ class KandinskyV22ControlnetPipeline(DiffusionPipeline):
 
             image = image.to(dtype=image_embeds.dtype, device=device)
             image = self.movq.encode(image)["latents"]
-
-        control_image = prepare_control_image(control_image, height, width)
-        control_image = control_image.to(dtype=image_embeds.dtype, device=device)
-        control_image = control_image.repeat_interleave(num_images_per_prompt, dim=0)
+        
+        if control_image is not None:
+            control_image = prepare_control_image(control_image, height, width)
+            control_image = control_image.to(dtype=image_embeds.dtype, device=device)
         
         if self.do_classifier_free_guidance:
             control_image = control_image.repeat(2, 1, 1, 1)
@@ -346,23 +346,25 @@ class KandinskyV22ControlnetPipeline(DiffusionPipeline):
         num_channels_latents = self.movq.config.latent_channels
 
         height, width = downscale_height_and_width(height, width, self.movq_scale_factor)
-
+        
         # create initial latent
         latents = self.prepare_latents(
             (batch_size, num_channels_latents, height, width),
             image_embeds.dtype,
             device,
             generator,
-            latents if strength == 1.0 else image,
+            latents if strength == 1.0 else image.repeat(batch_size, 1, 1, 1),
             self.scheduler,
             latent_timestep,
         )
+
+        control_image = control_image.repeat_interleave(num_images_per_prompt, 0)
 
         self._num_timesteps = len(timesteps)
         for i, t in enumerate(self.progress_bar(timesteps)):
             # expand the latents if we are doing classifier free guidance
             latent_model_input = torch.cat([latents] * 2) if self.do_classifier_free_guidance else latents
-
+           
             cond_added_cond_kwargs = {"image_embeds": image_embeds}
             down_block_res_samples, mid_block_res_sample = self.controlnet(
                 latent_model_input,
