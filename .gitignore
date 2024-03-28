@@ -1,4 +1,9 @@
+copy/*
+Favorfit_image_to_text/*
+Favorfit_remove_bg/*
+IPAdapter/*
 kandi_2_2-model-finetuned-lora/*
+kandi_2_2-model-text-inversion/*
 copy/
 diffusers_parents/
 pychache/
@@ -10,7 +15,7 @@ output/
 advertise/
 template/
 *.pyc
-# caption_dict.json
+caption_dict.json
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

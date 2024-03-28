@@ -162,7 +162,7 @@ def parse_args():
     parser.add_argument(
         "--output_dir",
         type=str,
-        default="kandi_2_2-model-finetuned-lora",
+        default="kandi_2_2-model-text-inversion",
         help="The output directory where the model predictions and checkpoints will be written.",
     )
     parser.add_argument(
@@ -283,7 +283,7 @@ def parse_args():
     parser.add_argument(
         "--report_to",
         type=str,
-        default="tensorboard",
+        default=None,
         help=(
             'The integration to report the results and logs to. Supported platforms are `"tensorboard"`'
             ' (default), `"wandb"` and `"comet_ml"`. Use `"all"` to report to all integrations.'
@@ -529,7 +529,7 @@ def main():
                 transforms.CenterCrop(512),
                 transforms.RandomHorizontalFlip(p=0.5),
                 transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.001),
-                transforms.ToTensor(),
+                # transforms.ToTensor(),
                 # transforms.Normalize([0.5], [0.5]),
             ]
         )
@@ -656,14 +656,14 @@ def main():
         unet = UNet2DConditionModel.from_pretrained(
             args.pretrained_decoder_model_name_or_path, subfolder="unet", torch_dtype=torch.float16
         ).eval()
-    
-        # create pipeline
+
         pipeline = AutoPipelineForText2Image.from_pretrained(
-            args.pretrained_decoder_model_name_or_path,
-            unet=unet,
-            prior_prior=accelerator.unwrap_model(prior),
-            torch_dtype=weight_dtype,
-        )
+                args.pretrained_decoder_model_name_or_path,
+                unet=unet,
+                prior_text_encoder=accelerator.unwrap_model(text_encoder),
+                prior_prior=prior,
+                torch_dtype=weight_dtype,
+            )
         pipeline = pipeline.to(accelerator.device)
         pipeline.set_progress_bar_config(disable=True)
 
@@ -673,14 +673,12 @@ def main():
             generator = generator.manual_seed(args.seed)
         images = []
         for _ in range(args.num_validation_images):
-            images.append(
-                pipeline(args.validation_prompt, num_inference_steps=30, generator=generator).images[0]
-            )
+            with torch.autocast("cuda", torch.float16):
+                images.append(
+                    pipeline(args.validation_prompt, num_inference_steps=30, generator=generator).images[0]
+                )
 
         for tracker in accelerator.trackers:
-            if tracker.name == "tensorboard":
-                np_images = np.stack([np.asarray(img) for img in images])
-                tracker.writer.add_images("validation", np_images, epoch, dataformats="NHWC")
             if tracker.name == "wandb":
                 tracker.log(
                     {
@@ -702,34 +700,35 @@ def main():
                 # Convert images to latent space
                 text_input_ids, text_mask, clip_images = (
                     batch["text_input_ids"],
-                    batch["text_mask"],
+                    batch["text_mask"].to(weight_dtype),
                     batch["clip_pixel_values"].to(weight_dtype),
                 )
-                with torch.no_grad():
-                    text_encoder_output = text_encoder(text_input_ids)
-                    prompt_embeds = text_encoder_output.text_embeds
-                    text_encoder_hidden_states = text_encoder_output.last_hidden_state
 
-                    image_embeds = image_encoder(clip_images).image_embeds
-                    # Sample noise that we'll add to the image_embeds
-                    noise = torch.randn_like(image_embeds)
-                    bsz = image_embeds.shape[0]
-                    # Sample a random timestep for each image
-                    timesteps = torch.randint(
-                        0, noise_scheduler.config.num_train_timesteps, (bsz,), device=image_embeds.device
-                    )
-                    timesteps = timesteps.long()
-                    image_embeds = (image_embeds - clip_mean) / clip_std
-                    noisy_latents = noise_scheduler.add_noise(image_embeds, noise, timesteps)
+                text_encoder_output = text_encoder(text_input_ids)
 
-                    target = image_embeds
+                prompt_embeds = text_encoder_output.text_embeds
+                text_encoder_hidden_states = text_encoder_output.last_hidden_state
+
+                image_embeds = image_encoder(clip_images).image_embeds
+                # Sample noise that we'll add to the image_embeds
+                noise = torch.randn_like(image_embeds)
+                bsz = image_embeds.shape[0]
+                # Sample a random timestep for each image
+                timesteps = torch.randint(
+                    0, noise_scheduler.config.num_train_timesteps, (bsz,), device=image_embeds.device
+                )
+                timesteps = timesteps.long()
+                image_embeds = (image_embeds - clip_mean) / clip_std
+                noisy_latents = noise_scheduler.add_noise(image_embeds, noise, timesteps)
+
+                target = image_embeds
 
                 # Predict the noise residual and compute loss
                 model_pred = prior(
                     noisy_latents,
                     timestep=timesteps,
-                    proj_embedding=prompt_embeds,
-                    encoder_hidden_states=text_encoder_hidden_states,
+                    proj_embedding=prompt_embeds.to(weight_dtype),
+                    encoder_hidden_states=text_encoder_hidden_states.to(weight_dtype),
                     attention_mask=text_mask,
                 ).predicted_image_embedding
 
@@ -768,8 +767,8 @@ def main():
             if accelerator.sync_gradients:
                 progress_bar.update(1)
                 global_step += 1
-                for name, param in prior.named_parameters():
-                    if "lora" in name:
+                for name, param in text_encoder.named_parameters():
+                    if param.grad is not None:
                         wandb.log({f"{name}_mean": param.mean().item(), f"{name}_std": param.std().item()}, step=global_step)
                 accelerator.log({"train_loss": train_loss}, step=global_step)
                 train_loss = 0.0
@@ -821,7 +820,8 @@ def main():
                 pipeline = AutoPipelineForText2Image.from_pretrained(
                     args.pretrained_decoder_model_name_or_path,
                     unet=unet,
-                    prior_prior=accelerator.unwrap_model(prior),
+                    prior_text_encoder=accelerator.unwrap_model(text_encoder),
+                    prior_prior=prior,
                     torch_dtype=weight_dtype,
                 )
                 pipeline = pipeline.to(accelerator.device)
@@ -833,9 +833,10 @@ def main():
                     generator = generator.manual_seed(args.seed)
                 images = []
                 for _ in range(args.num_validation_images):
-                    images.append(
-                        pipeline(args.validation_prompt, num_inference_steps=30, generator=generator).images[0]
-                    )
+                    with torch.autocast("cuda", torch.float16):
+                        images.append(
+                            pipeline(args.validation_prompt, num_inference_steps=30, generator=generator).images[0]
+                        )
 
                 for tracker in accelerator.trackers:
                     if tracker.name == "tensorboard":
@@ -874,4 +875,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
