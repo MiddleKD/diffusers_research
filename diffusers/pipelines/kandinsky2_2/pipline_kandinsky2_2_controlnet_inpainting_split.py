@@ -521,7 +521,7 @@ class KandinskyV22ControlnetInpaintPipeline(DiffusionPipeline):
 
             cond_added_cond_kwargs = {"image_embeds": image_embeds}
             down_block_res_samples, mid_block_res_sample = self.controlnet(
-                latent_model_input,
+                latent_control_input,
                 t,
                 encoder_hidden_states=None,
                 controlnet_cond=control_image,
